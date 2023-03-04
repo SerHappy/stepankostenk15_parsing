@@ -1,3 +1,7 @@
 .csv
 csv/**
 csv/courses.csv
+build/
+env/
+dist/
+*.spec
