@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 import csv
 import datetime
+import logging
 from tqdm import tqdm
 
 from urllib3 import Retry
@@ -22,11 +23,10 @@ session.mount("https://", adapter)
 requests.packages.urllib3.disable_warnings(
     requests.packages.urllib3.exceptions.InsecureRequestWarning
 )
+logging.basicConfig(level=logging.INFO)
 
 
-def get_pages_count(home_url: str) -> int:
-    """Get pages count"""
-
+def get_pages_count(home_url) -> int:
     response = session.get(url=home_url, headers=headers, verify=False)
 
     soup = BeautifulSoup(response.text, "lxml")
@@ -36,78 +36,62 @@ def get_pages_count(home_url: str) -> int:
     return int(navigation_titles[-2].text)
 
 
-def get_headers(filename: str) -> list[str]:
-    """Get csv file header row"""
-
-    with open(filename, "r", encoding="utf-16") as file:
+def get_header(filename) -> list[str]:
+    with open(filename, "r", encoding="cp1251") as file:
         reader = csv.reader(file, delimiter=",")
         return next(reader)
 
 
-def add_headers(filename: str, headers: list[str]) -> None:
-    """Add headers to csv file"""
-
-    with open(filename, "w", encoding="utf-16") as file:
-        writer = csv.writer(file, delimiter=",")
-        writer.writerow(headers)
-
-
-def get_csv(filename: str) -> list[list[str]]:
-    """Get all data from csv"""
-
-    with open(filename, "r", encoding="utf-16") as file:
+def read_from_csv(filename) -> list[list[str]]:
+    with open(filename, "r", encoding="cp1251") as file:
         reader = csv.reader(file, delimiter=",")
         csv_data = [item for item in reader]
         return csv_data
 
 
-def create_csv(filename: str, data: list[str]) -> None:
-    """Create csv file with data"""
-
+def create_csv(filename, data):
     header = ["", datetime.datetime.now(), ""]
-    with open(filename, "w", encoding="utf-16") as file:
+    with open(filename, "w", encoding="cp1251") as file:
         writer = csv.writer(file, delimiter=",")
         writer.writerow(header)
         for item in data:
             writer.writerow(item)
 
 
-def add_to_csv(filename: str, data: list[str]) -> None:
-    """Add data to csv file"""
+def add_headers(filename, headers):
+    with open(filename, "w", encoding="cp1251") as file:
+        writer = csv.writer(file, delimiter=",")
+        writer.writerow(headers)
 
-    with open(filename, "w", encoding="utf-16") as file:
+
+def add_to_csv(filename, data) -> None:
+    with open(filename, "w", encoding="cp1251") as file:
         writer = csv.writer(file, delimiter=",")
         for item in data:
             writer.writerow(item)
 
 
-def new_iteration_csv(filename: str, data: list[str]) -> None:
-    """Add new headers to csv at new parser iteration"""
-
-    header = get_headers(filename)
+def new_iteration_csv(filename, data) -> None:
+    header = get_header(filename)
     header.append(str(datetime.datetime.now()))
     header.append("")
-    with open(filename, "w", encoding="utf-16") as file:
+    with open(filename, "w", encoding="cp1251") as file:
         writer = csv.writer(file, delimiter=",")
         writer.writerow(header)
         for item in data[1:]:
             writer.writerow(item)
 
 
-def data_to_csv(
-    filename: str, data: list[str], first_dataframe: bool = False
-) -> None:
-    """Add data to csv file or create it"""
-
+def data_to_csv(filename, data, first_dataframe=False) -> None:
     if not os.path.exists(filename):
         create_csv(filename, data)
     else:
         if first_dataframe == True:
-            new_iteration_csv(filename, get_csv(filename))
+            new_iteration_csv(filename, read_from_csv(filename))
 
-        csv_data = get_csv(filename)
+        csv_data = read_from_csv(filename)
 
-        headers_len = len(get_headers(filename))
+        headers_len = len(get_header(filename))
         for data_item in data:
             for i, csv_item in enumerate(csv_data):
                 if data_item[0] == csv_item[0]:
@@ -131,8 +115,6 @@ def data_to_csv(
 
 
 def get_item_data(item) -> list[str]:
-    """Get item data"""
-
     item_name = item.find("div", class_="author-item-name").text
     item_li = (
         item.find("div", class_="author-item-stat")
@@ -150,9 +132,7 @@ def get_item_data(item) -> list[str]:
     return [item_name, item_views, item_revs]
 
 
-def get_page_data(url_page: str) -> list[list[str]]:
-    """Get data of all items on page"""
-
+def get_page_data(url_page) -> list[list[str]]:
     response_page = session.get(url=url_page, headers=headers, verify=False)
 
     soup = BeautifulSoup(response_page.text, "lxml")
@@ -162,34 +142,36 @@ def get_page_data(url_page: str) -> list[list[str]]:
     page_items = []
     i = 0
     for item in items:
+        logging.info(f"Item {i+1}/{len(items)}")
         item_data = get_item_data(item)
         if item_data != None:
             page_items.append(item_data)
+        else:
+            logging.info(f"Item {i+1} skipped")
         i += 1
 
     return page_items
 
 
-def gather_data(url: str, csv_filename: str) -> None:
-    """Gather all data"""
-
+def get_data(url, start_page=1):
     pages = get_pages_count(url)
 
-    first_page = True
-    for page in tqdm(range(1, pages + 1)):
+    first_page = True if start_page == 1 else False
+    for page in tqdm(range(start_page, pages + 1)):
+        logging.info(f"Page {page}/{pages}")
         url_page = f"{url}/?PAGEN_1={page}"
         page_data = get_page_data(url_page)
-        data_to_csv(csv_filename, page_data, first_page)
+        data_to_csv("csv/authors.csv", page_data, first_page)
         first_page = False
 
 
-def main() -> None:
-    """Main function"""
-
-    gather_data(
+def main():
+    start_time = datetime.datetime.now()
+    get_data(
         url="https://info-hit.ru/authors/",
-        csv_filename="csv/authors.csv",
     )
+    end_time = datetime.datetime.now()
+    print("Duration: {}".format(end_time - start_time))
 
 
 if __name__ == "__main__":
